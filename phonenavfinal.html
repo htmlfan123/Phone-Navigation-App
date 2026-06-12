@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Phone Nav Demo (Miles & Speed)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0b0c10;
+      color: #fff;
+      overscroll-behavior: none;
+    }
+
+    #app {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top navigation info bar */
+    #navBar {
+      position: relative;
+      padding: 10px 12px 8px;
+      background: linear-gradient(135deg, #0f172a, #1f2937);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      z-index: 1000;
+      max-height: 60%;
+      overflow-y: auto;
+    }
+
+    #routeSummary {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+
+    #routeSummary span.label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9ca3af;
+    }
+
+    #routeSummary span.value {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    /* Add speed display */
+    #speedBox {
+      text-align: right;
+    }
+
+    #nextInstruction {
+      font-size: 17px;
+      font-weight: 700;
+      color: #e5e7eb;
+      min-height: 22px;
+      margin-bottom: 3px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    #status {
+      font-size: 12px;
+      color: #9ca3af;
+      min-height: 16px;
+    }
+
+    /* Destination input row */
+    #controlsRow {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    #destination {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: none;
+      font-size: 14px;
+      outline: none;
+      position: relative;
+    }
+
+    #goBtn, #stopBtn, #nearbyBtn {
+      border-radius: 999px;
+      border: none;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #goBtn {
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+    }
+
+    #nearbyBtn {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+    }
+
+    #stopBtn {
+      background: #ef4444;
+    }
+
+    /* POI Search dropdown */
+    #poiSearchContainer {
+      margin-top: 6px;
+      display: none;
+    }
+
+    #poiSearchBox {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    #poiSearchBox input {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: none;
+      font-size: 14px;
+      outline: none;
+    }
+
+    #poiSearchBox button {
+      border-radius: 999px;
+      border: none;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      background: #3b82f6;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #poiResults {
+      background: #1f2937;
+      border-radius: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #374151;
+    }
+
+    .poi-item {
+      padding: 10px;
+      border-bottom: 1px solid #374151;
+      cursor: pointer;
+      transition: background 0.2s;
+      font-size: 13px;
+    }
+
+    .poi-item:hover {
+      background: #2d3748;
+    }
+
+    .poi-item:last-child {
+      border-bottom: none;
+    }
+
+    .poi-name {
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    .poi-distance {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 2px;
+    }
+
+    /* Map area */
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+
+    .leaflet-container {
+      background: #020617;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="navBar">
+      <div id="routeSummary">
+        <div>
+          <span class="label">Distance</span>
+          <span id="summaryDistance" class="value">–</span>
+        </div>
+        <div>
+          <span class="label">Time</span>
+          <span id="summaryTime" class="value">–</span>
+        </div>
+        <div id="speedBox">
+          <span class="label">Speed</span>
+          <span id="speedValue" class="value">– mph</span>
+        </div>
+      </div>
+
+      <div id="nextInstruction">Enter destination to start</div>
+      <div id="status">Waiting for GPS...</div>
+
+      <div id="controlsRow">
+        <input type="text" id="destination" placeholder="Where to?" />
+        <button id="goBtn">Go</button>
+        <button id="nearbyBtn">Nearby</button>
+        <button id="stopBtn">Stop</button>
+      </div>
+
+      <!-- POI Search Section -->
+      <div id="poiSearchContainer">
+        <div id="poiSearchBox">
+          <input type="text" id="poiSearch" placeholder="Search: wawa, gas, coffee..." />
+          <button id="poiSearchBtn">Search</button>
+        </div>
+        <div id="poiResults"></div>
+      </div>
+    </div>
+
+    <div id="map"></div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const nextInstructionEl = document.getElementById('nextInstruction');
+    const destInput = document.getElementById('destination');
+    const goBtn = document.getElementById('goBtn');
+    const nearbyBtn = document.getElementById('nearbyBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const summaryDistanceEl = document.getElementById('summaryDistance');
+    const summaryTimeEl = document.getElementById('summaryTime');
+    const speedValueEl = document.getElementById('speedValue');
+
+    // POI elements
+    const poiSearchContainer = document.getElementById('poiSearchContainer');
+    const poiSearchBox = document.getElementById('poiSearch');
+    const poiSearchBtn = document.getElementById('poiSearchBtn');
+    const poiResults = document.getElementById('poiResults');
+
+    let map, userMarker, destMarker, routeLine;
+    let currentPosition = null;
+
+    // Navigation state
+    let routeData = null;
+    let flatSteps = [];
+    let currentStepIndex = 0;
+    let watchId = null;
+    let lastStepDist = null;
+    let offRouteCounter = 0;
+
+    const STEP_THRESHOLD_METERS = 35;
+    const OFF_ROUTE_TOLERANCE = 20;
+    const OFF_ROUTE_TICKS = 3;
+
+    // Wake Lock state
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) {
+        console.log('Wake Lock API not supported in this browser.');
+        return;
+      }
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('Wake Lock active');
+        wakeLock.addEventListener('release', () => {
+          console.log('Wake Lock released');
+          wakeLock = null;
+        });
+      } catch (err) {
+        console.error('Wake Lock error:', err.name, err.message);
+      }
+    }
+
+    async function releaseWakeLock() {
+      if (wakeLock) {
+        try {
+          await wakeLock.release();
+          wakeLock = null;
+          console.log('Wake Lock manually released');
+        } catch (err) {
+          console.error('Error releasing Wake Lock:', err);
+        }
+      }
+    }
+
+    // Text-to-speech
+    function speak(text) {
+      if (!('speechSynthesis' in window)) return;
+      const msg = new SpeechSynthesisUtterance(text);
+      msg.lang = 'en-US';
+      msg.rate = 1.0;
+      msg.pitch = 1.0;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(msg);
+    }
+
+    // Map setup
+    map = L.map('map', {
+      zoomControl: false
+    }).setView([40.7128, -74.0060], 16);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Distance helper (Haversine)
+    function distanceMeters(a, b) {
+      const R = 6371000;
+      const toRad = d => d * Math.PI / 180;
+
+      const dLat = toRad(b.lat - a.lat);
+      const dLon = toRad(b.lng - a.lng);
+
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+
+      const sinDLat = Math.sin(dLat / 2);
+      const sinDLon = Math.sin(dLon / 2);
+
+      const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+      const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+
+      return R * c;
+    }
+
+    function formatDistanceMiles(meters) {
+      const miles = meters / 1609.34;
+      if (miles < 0.2) {
+        const feet = meters * 3.28084;
+        return `${Math.round(feet)} ft`;
+      }
+      return `${miles.toFixed(1)} mi`;
+    }
+
+    function formatMinutes(seconds) {
+      const mins = Math.round(seconds / 60);
+      return `${mins} min`;
+    }
+
+    function msToMph(ms) {
+      return ms * 2.23694;
+    }
+
+    // GPS watch
+    function startWatchingLocation() {
+      if (!navigator.geolocation) {
+        statusEl.textContent = 'Geolocation not supported.';
+        return;
+      }
+
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+
+      watchId = navigator.geolocation.watchPosition(
+        pos => {
+          currentPosition = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          };
+
+          if (pos.coords.speed != null && !isNaN(pos.coords.speed)) {
+            const mph = msToMph(pos.coords.speed);
+            speedValueEl.textContent = `${Math.round(mph)} mph`;
+          } else {
+            speedValueEl.textContent = '– mph';
+          }
+
+          if (!userMarker) {
+            userMarker = L.marker([currentPosition.lat, currentPosition.lng]).addTo(map)
+              .bindPopup('You');
+          } else {
+            userMarker.setLatLng([currentPosition.lat, currentPosition.lng]);
+          }
+
+          const desiredZoom = 17;
+          map.setView([currentPosition.lat, currentPosition.lng], desiredZoom);
+
+          if (routeData && flatSteps.length > 0) {
+            updateNavigationStep();
+          } else {
+            statusEl.textContent = `GPS: ${currentPosition.lat.toFixed(5)}, ${currentPosition.lng.toFixed(5)}`;
+          }
+        },
+        err => {
+          statusEl.textContent = 'GPS error: ' + err.message;
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 1000,
+          timeout: 10000
+        }
+      );
+    }
+
+    startWatchingLocation();
+
+    // Geocode address (Nominatim)
+    async function geocodeAddress(address) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      if (!res.ok) throw new Error('Geocoding failed');
+      const data = await res.json();
+      if (!data || data.length === 0) throw new Error('No results for that address');
+
+      const best = data[0];
+      return {
+        lat: parseFloat(best.lat),
+        lng: parseFloat(best.lon),
+        displayName: best.display_name
+      };
+    }
+
+    // Search POIs using Photon API (free)
+    async function searchPOI(query, latitude, longitude) {
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=${latitude}&lon=${longitude}&limit=15`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('POI search failed');
+        const data = await res.json();
+        return data.features || [];
+      } catch (e) {
+        console.error('POI search error:', e);
+        return [];
+      }
+    }
+
+    // Get route from OSRM
+    async function getRoute(start, end) {
+      const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&steps=true`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Routing failed');
+      const data = await res.json();
+      if (!data.routes || data.routes.length === 0) throw new Error('No route found');
+      return data.routes[0];
+    }
+
+    // Flatten steps
+    function buildFlatSteps(route) {
+      const out = [];
+      route.legs.forEach(leg => {
+        leg.steps.forEach(step => {
+          const m = step.maneuver;
+          out.push({
+            coord: { lat: m.location[1], lng: m.location[0] },
+            distance: step.distance,
+            duration: step.duration,
+            instruction: m.instruction || step.name || 'Continue'
+          });
+        });
+      });
+      return out;
+    }
+
+    // Show route on map
+    function showRoute(route, destName) {
+      routeData = route;
+      flatSteps = buildFlatSteps(route);
+      currentStepIndex = 0;
+      lastStepDist = null;
+      offRouteCounter = 0;
+
+      if (routeLine) map.removeLayer(routeLine);
+      if (destMarker) map.removeLayer(destMarker);
+
+      const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+      routeLine = L.polyline(coords, { color: '#3b82f6', weight: 5 }).addTo(map);
+
+      const end = coords[coords.length - 1];
+      destMarker = L.marker(end).addTo(map).bindPopup(destName || 'Destination');
+
+      summaryDistanceEl.textContent = formatDistanceMiles(route.distance);
+      summaryTimeEl.textContent = formatMinutes(route.duration);
+
+      if (flatSteps.length > 0) {
+        const first = flatSteps[0];
+        nextInstructionEl.textContent = first.instruction;
+        statusEl.textContent = `Route ready. First turn in ${formatDistanceMiles(first.distance)}.`;
+        speak(`Route ready. In ${formatDistanceMiles(first.distance)}, ${first.instruction}`);
+      } else {
+        nextInstructionEl.textContent = 'Route ready.';
+      }
+
+      // Hide POI search after selection
+      poiSearchContainer.style.display = 'none';
+    }
+
+    // Recalculate route from current position
+    async function recalcRouteFromHere() {
+      if (!currentPosition || !destMarker) return;
+
+      const destLatLng = destMarker.getLatLng();
+      const dest = { lat: destLatLng.lat, lng: destLatLng.lng };
+
+      statusEl.textContent = 'Off route. Recalculating...';
+      speak('Recalculating route');
+
+      try {
+        const route = await getRoute(currentPosition, dest);
+        showRoute(route, 'Destination');
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = 'Reroute failed: ' + e.message;
+      }
+    }
+
+    // Update navigation each GPS tick
+    function updateNavigationStep() {
+      if (!currentPosition || flatSteps.length === 0) return;
+
+      const step = flatSteps[currentStepIndex];
+      if (!step) return;
+
+      const dist = distanceMeters(currentPosition, step.coord);
+
+      if (lastStepDist !== null && dist > lastStepDist + OFF_ROUTE_TOLERANCE) {
+        offRouteCounter++;
+      } else {
+        offRouteCounter = 0;
+      }
+      lastStepDist = dist;
+
+      if (offRouteCounter > OFF_ROUTE_TICKS) {
+        offRouteCounter = 0;
+        recalcRouteFromHere();
+        return;
+      }
+
+      if (dist < STEP_THRESHOLD_METERS) {
+        if (currentStepIndex < flatSteps.length - 1) {
+          currentStepIndex++;
+          const nextStep = flatSteps[currentStepIndex];
+          nextInstructionEl.textContent = nextStep.instruction;
+          statusEl.textContent = `Next turn in ${formatDistanceMiles(nextStep.distance)}`;
+          speak(`In ${formatDistanceMiles(nextStep.distance)}, ${nextStep.instruction}`);
+        } else {
+          nextInstructionEl.textContent = 'Arrived at destination';
+          statusEl.textContent = 'You have arrived.';
+          speak('You have arrived at your destination');
+        }
+      } else {
+        nextInstructionEl.textContent = step.instruction;
+        statusEl.textContent = `Next: ${formatDistanceMiles(dist)}`;
+      }
+    }
+
+    // Stop navigation
+    function stopNavigation() {
+      routeData = null;
+      flatSteps = [];
+      currentStepIndex = 0;
+      lastStepDist = null;
+      offRouteCounter = 0;
+
+      if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+      if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+
+      summaryDistanceEl.textContent = '–';
+      summaryTimeEl.textContent = '–';
+      nextInstructionEl.textContent = 'Navigation stopped';
+      statusEl.textContent = 'Waiting for destination.';
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+
+      poiSearchContainer.style.display = 'none';
+      releaseWakeLock();
+    }
+
+    // Nearby POI search
+    nearbyBtn.addEventListener('click', async () => {
+      if (!currentPosition) {
+        alert('Waiting for GPS. Allow location access.');
+        return;
+      }
+
+      poiSearchContainer.style.display = 'block';
+      poiSearchBox.focus();
+      statusEl.textContent = 'Enter search term for nearby places.';
+    });
+
+    // POI search
+    poiSearchBtn.addEventListener('click', async () => {
+      const query = poiSearchBox.value.trim();
+      if (!query) {
+        alert('Enter search term (e.g., wawa, gas, coffee)');
+        return;
+      }
+      if (!currentPosition) {
+        alert('Waiting for GPS.');
+        return;
+      }
+
+      statusEl.textContent = 'Searching nearby...';
+      poiResults.innerHTML = '<div style="padding: 10px; color: #9ca3af;">Searching...</div>';
+
+      try {
+        const results = await searchPOI(query, currentPosition.lat, currentPosition.lng);
+
+        if (results.length === 0) {
+          poiResults.innerHTML = '<div style="padding: 10px; color: #9ca3af;">No results found.</div>';
+          statusEl.textContent = 'No nearby places found.';
+          return;
+        }
+
+        poiResults.innerHTML = '';
+        results.forEach((result, idx) => {
+          const props = result.properties;
+          const coords = result.geometry.coordinates;
+          const lat = coords[1];
+          const lng = coords[0];
+          const dist = distanceMeters(currentPosition, { lat, lng });
+
+          const name = props.name || 'Unnamed';
+          const type = props.type || '';
+          const displayDist = formatDistanceMiles(dist);
+
+          const item = document.createElement('div');
+          item.className = 'poi-item';
+          item.innerHTML = `
+            <div class="poi-name">${name}</div>
+            <div class="poi-distance">${type ? type + ' • ' : ''}${displayDist} away</div>
+          `;
+
+          item.addEventListener('click', async () => {
+            statusEl.textContent = `Selected: ${name}. Calculating route...`;
+            try {
+              const route = await getRoute(currentPosition, { lat, lng });
+              showRoute(route, name);
+              destInput.value = name;
+              requestWakeLock();
+            } catch (e) {
+              statusEl.textContent = 'Route error: ' + e.message;
+            }
+          });
+
+          poiResults.appendChild(item);
+        });
+
+        statusEl.textContent = `Found ${results.length} places. Tap to navigate.`;
+      } catch (e) {
+        console.error(e);
+        poiResults.innerHTML = '<div style="padding: 10px; color: #ef4444;">Search error.</div>';
+        statusEl.textContent = 'Search error: ' + e.message;
+      }
+    });
+
+    // Go button (manual address entry)
+    goBtn.addEventListener('click', async () => {
+      const address = destInput.value.trim();
+      if (!address) {
+        alert('Enter a destination.');
+        return;
+      }
+      if (!currentPosition) {
+        alert('Waiting for GPS. Allow location access.');
+        return;
+      }
+
+      statusEl.textContent = 'Finding destination...';
+      poiSearchContainer.style.display = 'none';
+
+      try {
+        const dest = await geocodeAddress(address);
+        statusEl.textContent = 'Calculating route...';
+
+        const route = await getRoute(currentPosition, dest);
+        statusEl.textContent = 'Route ready. Start driving.';
+
+        showRoute(route, dest.displayName);
+        requestWakeLock();
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = 'Error: ' + e.message;
+        alert('Error: ' + e.message);
+      }
+    });
+
+    // Stop button
+    stopBtn.addEventListener('click', () => {
+      stopNavigation();
+    });
+
+    // Allow Enter key in POI search
+    poiSearchBox.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        poiSearchBtn.click();
+      }
+    });
+  </script>
+</body>
+</html>
