@@ -1,0 +1,394 @@
+let map, userMarker, destMarker, routeLine;
+let currentPosition = null;
+let currentHeading = null;
+let debounceTimer = null;
+
+// Navigation Tracking state records
+let routeCoordinates = [];
+let flatSteps = [];
+let currentStepIndex = 0;
+let watchId = null;
+let offRouteCounter = 0;
+let isAutoCenter = true;
+
+const STEP_THRESHOLD_METERS = 25;
+const OFF_ROUTE_TOLERANCE_METERS = 50;
+const OFF_ROUTE_TICKS = 3;
+
+let wakeLock = null;
+
+// Element Target Connectors
+const searchInput = document.getElementById('searchInput');
+const suggestionsList = document.getElementById('suggestionsList');
+const searchContainer = document.getElementById('searchContainer');
+const hudContainer = document.getElementById('hudContainer');
+const recenterBtn = document.getElementById('recenterBtn');
+
+const nextInstructionEl = document.getElementById('nextInstruction');
+const statusMessageEl = document.getElementById('statusMessage');
+const hudDistanceEl = document.getElementById('hudDistance');
+const hudTimeEl = document.getElementById('hudTime');
+const hudSpeedEl = document.getElementById('hudSpeed');
+const stopBtn = document.getElementById('stopBtn');
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().then(() => wakeLock = null); }
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  const msg = new SpeechSynthesisUtterance(text);
+  msg.lang = 'en-US';
+  speechSynthesis.cancel();
+  speechSynthesis.speak(msg);
+}
+
+// Map Environment Base Construction
+map = L.map('map', { zoomControl: false }).setView([40.7128, -74.0060], 16);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+// Precise Math Formula: Route Path Cross Track Calculations
+function getClosestPointOnSegment(p, a, b) {
+  const x = p.lng, y = p.lat, x1 = a[0], y1 = a[1], x2 = b[0], y2 = b[1];
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  let t = 0;
+  if (lenSq > 0) {
+    t = ((x - x1) * dx + (y - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+  }
+  return { lat: y1 + t * dy, lng: x1 + t * dx };
+}
+
+function getDistanceToRoute(p, polylineCoords) {
+  if (!polylineCoords || polylineCoords.length === 0) return Infinity;
+  let minDist = Infinity;
+  for (let i = 0; i < polylineCoords.length - 1; i++) {
+    const cp = getClosestPointOnSegment(p, polylineCoords[i], polylineCoords[i+1]);
+    const d = distanceMeters(p, cp);
+    if (d < minDist) minDist = d;
+  }
+  return minDist;
+}
+
+function distanceMeters(a, b) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * (2 * Math.atan2(Math.sqrt(h), Math.sqrt(1-h)));
+}
+
+function formatDistance(meters) {
+  const miles = meters / 1609.34;
+  return miles < 0.2 ? `${Math.round(meters * 3.28084)} ft` : `${miles.toFixed(1)} mi`;
+}
+
+function getArrowIconHtml(heading) {
+  const angle = heading || 0;
+  return `<div style="transform: rotate(${angle}deg); transition: transform 0.2s ease-out; width:32px; height:32px;">
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="16" cy="16" r="12" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-width="2"/>
+      <path d="M16 4L24 24L16 19L8 24L16 4Z" fill="#3b82f6" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+  </div>`;
+}
+
+function updateMapOrientation() {
+  if (!currentPosition) return;
+  if (isAutoCenter) {
+    map.setView([currentPosition.lat, currentPosition.lng], 17);
+    if (currentHeading !== null && !isNaN(currentHeading)) {
+      document.querySelector('.leaflet-map-pane').style.transform = `rotate(${-currentHeading}deg)`;
+      if (destMarker && destMarker.getElement()) {
+        destMarker.getElement().style.transform += ` rotate(${currentHeading}deg)`;
+      }
+    }
+  } else {
+    document.querySelector('.leaflet-map-pane').style.transform = 'none';
+  }
+}
+
+// Geolocation Stream Setup
+function startWatchingLocation() {
+  if (!navigator.geolocation) return;
+  watchId = navigator.geolocation.watchPosition(
+    pos => {
+      currentPosition = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      currentHeading = pos.coords.heading;
+      
+      const rawSpeed = pos.coords.speed;
+      hudSpeedEl.textContent = rawSpeed > 0.5 ? `${Math.round(rawSpeed * 2.23694)} mph` : '0 mph';
+
+      if (!userMarker) {
+        userMarker = L.marker([currentPosition.lat, currentPosition.lng], {
+          icon: L.divIcon({ html: getArrowIconHtml(currentHeading), className: 'user-marker', iconSize:[32,32], iconAnchor:[16,16]})
+        }).addTo(map);
+      } else {
+        userMarker.setLatLng([currentPosition.lat, currentPosition.lng]);
+        userMarker.setIcon(L.divIcon({ html: getArrowIconHtml(currentHeading), className: 'user-marker', iconSize:[32,32], iconAnchor:[16,16]}));
+      }
+
+      updateMapOrientation();
+
+      if (routeCoordinates.length > 0) {
+        // FIX: If speed is 0 or less than 1mph, assume user is stopped at light/sign and SKIP off-route increments
+        const isUserStopped = (rawSpeed !== null && rawSpeed < 0.45);
+        
+        if (!isUserStopped) {
+          const variance = getDistanceToRoute(currentPosition, routeCoordinates);
+          if (variance > OFF_ROUTE_TOLERANCE_METERS) {
+            offRouteCounter++;
+            if (offRouteCounter >= OFF_ROUTE_TICKS) {
+              offRouteCounter = 0;
+              recalcRouteFromHere();
+            }
+          } else {
+            offRouteCounter = 0;
+            updateNavigationStep();
+          }
+        } else {
+          updateNavigationStep(); // Just refresh normal node distances
+        }
+      }
+    },
+    err => { console.log('GPS Signal Interrupted'); },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+  );
+}
+
+// Waze Style interaction handling
+map.on('dragstart zoomstart', () => {
+  if (routeCoordinates.length > 0 && isAutoCenter) {
+    isAutoCenter = false;
+    recenterBtn.style.display = 'block';
+    document.querySelector('.leaflet-map-pane').style.transform = 'none';
+  }
+});
+
+recenterBtn.addEventListener('click', () => {
+  isAutoCenter = true;
+  recenterBtn.style.display = 'none';
+  updateMapOrientation();
+});
+
+// FIX: Map clicks are completely ignored while a drive route is active to prevent accidental route ruin.
+map.on('click', async (e) => {
+  if (routeCoordinates.length > 0 || !currentPosition) return;
+  
+  statusMessageEl.textContent = "Loading chosen destination...";
+  try {
+    const route = await getRoute(currentPosition, e.latlng);
+    showRoute(route, "Pinned Map Position");
+    requestWakeLock();
+  } catch (err) {
+    statusMessageEl.textContent = "Unable to route to selected spot.";
+  }
+});
+
+// Integrated Autocomplete engine listeners
+searchInput.addEventListener('input', () => {
+  clearTimeout(debounceTimer);
+  const query = searchInput.value.trim();
+  
+  if (query.length < 2) {
+    suggestionsList.innerHTML = '';
+    return;
+  }
+
+  debounceTimer = setTimeout(() => {
+    executeSearchQuery(query);
+  }, 300);
+});
+
+async function executeSearchQuery(query) {
+  let url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=6`;
+  // Biases suggestions directly around the driver's current coordinates if available
+  if (currentPosition) {
+    url += `&lat=${currentPosition.lat}&lon=${currentPosition.lng}`;
+  }
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    renderSuggestions(data.features || []);
+  } catch (e) {
+    console.error("Autocomplete failure");
+  }
+}
+
+function renderSuggestions(features) {
+  suggestionsList.innerHTML = '';
+  if (features.length === 0) return;
+
+  features.forEach(f => {
+    const props = f.properties;
+    const coords = f.geometry.coordinates;
+    const latLng = { lat: coords[1], lng: coords[0] };
+
+    const item = document.createElement('div');
+    item.className = 'suggestion-item';
+    
+    let subDetails = [props.city, props.state, props.country].filter(Boolean).join(', ');
+    if (currentPosition) {
+      const dist = distanceMeters(currentPosition, latLng);
+      subDetails = `${formatDistance(dist)} away • ${subDetails}`;
+    }
+
+    item.innerHTML = `
+      <span class="suggest-title">${props.name || props.street || 'Location'}</span>
+      <span class="suggest-subtitle">${subDetails || 'View details'}</span>
+    `;
+
+    item.addEventListener('click', async () => {
+      if (!currentPosition) return;
+      suggestionsList.innerHTML = '';
+      searchInput.value = props.name || "Selected Destination";
+      
+      try {
+        const route = await getRoute(currentPosition, latLng);
+        showRoute(route, props.name || "Target Location");
+        requestWakeLock();
+      } catch (err) {
+        alert("Could not trace driving instructions to that location.");
+      }
+    });
+
+    suggestionsList.appendChild(item);
+  });
+}
+
+async function getRoute(start, end) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&steps=true`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error();
+  const data = await res.json();
+  if (!data.routes || data.routes.length === 0) throw new Error();
+  return data.routes[0];
+}
+
+function showRoute(route, destName) {
+  routeCoordinates = route.geometry.coordinates;
+  
+  // Map driving guidance text elements cleanly
+  flatSteps = [];
+  route.legs.forEach(leg => {
+    leg.steps.forEach(step => {
+      flatSteps.push({
+        coord: { lat: step.maneuver.location[1], lng: step.maneuver.location[0] },
+        instruction: step.maneuver.instruction || 'Continue straight',
+        spoken: false
+      });
+    });
+  });
+
+  currentStepIndex = 0;
+  offRouteCounter = 0;
+
+  if (routeLine) map.removeLayer(routeLine);
+  if (destMarker) map.removeLayer(destMarker);
+
+  const parsedCoords = routeCoordinates.map(c => [c[1], c[0]]);
+  routeLine = L.polyline(parsedCoords, { color: '#2563eb', weight: 6, opacity: 0.9 }).addTo(map);
+
+  const endPoint = parsedCoords[parsedCoords.length - 1];
+  destMarker = L.marker(endPoint).addTo(map);
+
+  hudDistanceEl.textContent = formatDistance(route.distance);
+  hudTimeEl.textContent = `${Math.round(route.duration / 60)} min`;
+
+  // UI Polish: Hide the search container box completely during navigation to free up screen real estate
+  searchContainer.style.display = 'none';
+  hudContainer.style.display = 'block';
+
+  if (flatSteps.length > 0) {
+    nextInstructionEl.textContent = flatSteps[0].instruction;
+    statusMessageEl.textContent = "Route Active";
+    speak(`Navigating to ${destName}. ${flatSteps[0].instruction}`);
+  }
+  
+  isAutoCenter = true;
+  recenterBtn.style.display = 'none';
+  updateMapOrientation();
+}
+
+async function recalcRouteFromHere() {
+  if (!currentPosition || !destMarker) return;
+  const destinationLatLng = destMarker.getLatLng();
+  statusMessageEl.textContent = 'Updating route guidance...';
+  speak('Recalculating route');
+  try {
+    const route = await getRoute(currentPosition, { lat: destinationLatLng.lat, lng: destinationLatLng.lng });
+    showRoute(route, searchInput.value || "Destination");
+  } catch (e) {
+    statusMessageEl.textContent = 'Route calculation error';
+  }
+}
+
+function updateNavigationStep() {
+  if (!currentPosition || flatSteps.length === 0) return;
+
+  // Smart tracking lookup fixes the sequential step trap by finding closest nodes ahead
+  let bestIndex = currentStepIndex;
+  let shortDistance = Infinity;
+
+  for (let i = currentStepIndex; i < flatSteps.length; i++) {
+    const d = distanceMeters(currentPosition, flatSteps[i].coord);
+    if (d < shortDistance) {
+      shortDistance = d;
+      bestIndex = i;
+    }
+  }
+
+  if (shortDistance < STEP_THRESHOLD_METERS && bestIndex >= currentStepIndex) {
+    currentStepIndex = bestIndex;
+    if (currentStepIndex < flatSteps.length - 1) {
+      currentStepIndex++;
+    }
+  }
+
+  const activeStep = flatSteps[currentStepIndex];
+  if (!activeStep) return;
+
+  const remainingDistance = distanceMeters(currentPosition, activeStep.coord);
+  nextInstructionEl.textContent = activeStep.instruction;
+  statusMessageEl.textContent = `Next change in ${formatDistance(remainingDistance)}`;
+
+  if (remainingDistance < (STEP_THRESHOLD_METERS + 15) && !activeStep.spoken) {
+    activeStep.spoken = true;
+    speak(activeStep.instruction);
+  }
+
+  if (currentStepIndex === flatSteps.length - 1 && remainingDistance < 15) {
+    nextInstructionEl.textContent = "You have arrived.";
+    statusMessageEl.textContent = "Drive completed.";
+    speak("You have arrived at your destination.");
+    stopNavigation();
+  }
+}
+
+function stopNavigation() {
+  routeCoordinates = [];
+  flatSteps = [];
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+  
+  hudContainer.style.display = 'none';
+  recenterBtn.style.display = 'none';
+  searchContainer.style.display = 'block';
+  
+  searchInput.value = '';
+  suggestionsList.innerHTML = '';
+  document.querySelector('.leaflet-map-pane').style.transform = 'none';
+  releaseWakeLock();
+}
+
+stopBtn.addEventListener('click', stopNavigation);
+startWatchingLocation();
