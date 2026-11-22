@@ -63,10 +63,10 @@ Phone-Navigation-App/
 └── README.md
 ```
 
-- `index.html` contains the page structure and interface styles.
-- `js/app.js` contains the search, GPS, routing, and navigation logic.
+- `index.html` is the html file
+- `js/app.js` contains the app.js
 
-## Browser Notes
+##tips
 
 - Location access is required for navigation.
 - Voice instructions depend on the voices and speech support available in the browser and operating system.
@@ -75,4 +75,4 @@ Phone-Navigation-App/
 
 ## Contributing
 
-Issues and pull requests are welcome. Possible improvements include bug fixes, accessibility improvements, interface updates, and better GPS or route handling.
+Issues and pull requests are welcome. some improvments would be css issues
