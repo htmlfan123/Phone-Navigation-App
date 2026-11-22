@@ -1,25 +1,24 @@
 # Phone Navigation App
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-2563eb?style=for-the-badge&logo=vercel&logoColor=white)](https://phonenav.vercel.app)
+[![Live demo](https://img.shields.io/badge/Live_Demo-2563eb?style=for-the-badge&logo=vercel&logoColor=white)](https://phonenav.vercel.app)
 [![JavaScript](https://img.shields.io/badge/JavaScript-71%25-f7df1e?style=for-the-badge&logo=javascript&logoColor=black)](https://developer.mozilla.org/docs/Web/JavaScript)
 [![HTML](https://img.shields.io/badge/HTML-29%25-e34f26?style=for-the-badge&logo=html5&logoColor=white)](https://developer.mozilla.org/docs/Web/HTML)
 
-A mobile navigation app built with HTML, CSS, and JavaScript. Search for a destination, follow a live route, and get spoken turn-by-turn directions in your browser.
-
+A mobile navigation app built with HTML, CSS, JS
 **[Open the live app](https://phonenav.vercel.app)**
 
 ## Features
 
-- Live GPS tracking
-- Destination search with nearby suggestions
-- OpenStreetMap-based interactive map
+- GPS tracking
+- POI Search
+- Uses OpenStreetMap
 - Driving routes powered by OSRM
-- Turn-by-turn text and voice instructions
+- Turn-by-turn voice via browser speech api
 - Distance, travel time, and speed information
 - Automatic recalculation after leaving the route
 - Destination pinning and map recenter controls
-- Mobile-friendly full-screen interface
-- Screen wake lock support while navigating
+- Mobile-friendly ui
+- Screen wake lock support
 
 ## Using the App
 
@@ -50,7 +49,7 @@ cd Phone-Navigation-App
 python -m http.server 8000
 ```
 
-Visit <http://localhost:8000/phonenavfinal.html>.
+Visit <http://localhost:8000/index.html>.
 
 Geolocation and wake lock features are best used over `localhost` or HTTPS. Browser support and permission settings vary by device.
 
@@ -58,13 +57,13 @@ Geolocation and wake lock features are best used over `localhost` or HTTPS. Brow
 
 ```text
 Phone-Navigation-App/
-├── phonenavfinal.html
+├── index.html
 ├── js/
 │   └── app.js
 └── README.md
 ```
 
-- `phonenavfinal.html` contains the page structure and interface styles.
+- `index.html` contains the page structure and interface styles.
 - `js/app.js` contains the search, GPS, routing, and navigation logic.
 
 ## Browser Notes
